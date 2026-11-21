@@ -1,0 +1,17 @@
+{
+  "name": "Our Little World ♡",
+  "short_name": "Our World",
+  "description": "A private couple space for memories, mood, distance, and daily love.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#FAF7F2",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
