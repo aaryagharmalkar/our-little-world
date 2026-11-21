@@ -14,9 +14,11 @@ export const PhotoLightbox: React.FC<Props> = ({ photo, onClose }) => {
 
   if (!photo) return null
 
+  const photoUrl = photo.signed_url || photo.public_url || ''
+
   const handleDownload = () => {
     const a = document.createElement('a')
-    a.href = photo.public_url
+    a.href = photoUrl
     a.download = `our_memory_${photo.id}.jpg`
     a.target = '_blank'
     a.rel = 'noreferrer'
@@ -39,7 +41,7 @@ export const PhotoLightbox: React.FC<Props> = ({ photo, onClose }) => {
         {/* Main Photograph */}
         <div className="relative rounded-3xl overflow-hidden shadow-2xl bg-black max-h-[75vh] flex items-center justify-center">
           <img
-            src={photo.public_url}
+            src={photoUrl}
             alt={photo.caption || 'Shared memory'}
             className="w-auto h-auto max-w-full max-h-[75vh] object-contain"
           />

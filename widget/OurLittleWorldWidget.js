@@ -450,7 +450,8 @@ async function createLargeWidget(data, photoImg) {
 // ------------------------------------------------------------------------------
 async function run() {
   const data = await fetchWidgetSnapshot();
-  const photoImg = await loadPhoto(data.photo?.public_url);
+  const photoUrl = data.photo?.signed_url || data.photo?.public_url;
+  const photoImg = await loadPhoto(photoUrl);
 
   let widget;
   const family = config.widgetFamily || "medium";

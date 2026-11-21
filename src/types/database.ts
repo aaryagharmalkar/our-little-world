@@ -21,7 +21,8 @@ export interface CoupleSpace {
   id: string
   name: string
   relationship_start_date: string
-  widget_access_token: string
+  widget_token_hash?: string
+  widget_access_token?: string
   created_by: string | null
   created_at: string
   updated_at: string
@@ -53,7 +54,8 @@ export interface Photo {
   space_id: string
   uploaded_by: string
   storage_path: string
-  public_url: string
+  public_url?: string
+  signed_url?: string
   caption: string
   is_favorite: boolean
   taken_at: string | null

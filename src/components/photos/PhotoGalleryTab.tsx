@@ -54,7 +54,7 @@ export const PhotoGalleryTab: React.FC<Props> = ({ onOpenUpload, onOpenPhotoLigh
         </div>
         {currentHourlyPhoto && (
           <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-blush-200 shrink-0 ml-2">
-            <img src={currentHourlyPhoto.public_url} alt="Active" className="w-full h-full object-cover" />
+            <img src={currentHourlyPhoto.signed_url || currentHourlyPhoto.public_url} alt="Active" className="w-full h-full object-cover" />
           </div>
         )}
       </div>
@@ -120,7 +120,7 @@ export const PhotoGalleryTab: React.FC<Props> = ({ onOpenUpload, onOpenPhotoLigh
               className="relative aspect-square rounded-2xl sm:rounded-3xl overflow-hidden bg-warm-100 border border-warm-200/60 shadow-soft cursor-pointer group hover:shadow-float transition-all"
             >
               <img
-                src={photo.public_url}
+                src={photo.signed_url || photo.public_url}
                 alt={photo.caption || 'Memory'}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 loading="lazy"

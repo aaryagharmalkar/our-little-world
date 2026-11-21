@@ -1,9 +1,9 @@
 -- ==============================================================================
 -- PROJECT: Our Little World ♡ ("Us ♡")
--- DATABASE MIGRATION: Initial Schema & Security Policies
+-- DATABASE MIGRATION: Production Schema & Airtight Security Hardening
 -- ==============================================================================
 
--- Enable UUID extension
+-- Enable required cryptographic extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS public.couple_spaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL DEFAULT 'Our Little World',
     relationship_start_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    widget_access_token TEXT UNIQUE NOT NULL DEFAULT encode(gen_random_bytes(24), 'hex'),
+    widget_token_hash TEXT UNIQUE NOT NULL,
+    widget_token_created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    widget_token_expires_at TIMESTAMPTZ DEFAULT (timezone('utc'::text, now()) + INTERVAL '365 days'),
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
@@ -57,7 +59,10 @@ ALTER TABLE public.couple_members ENABLE ROW LEVEL SECURITY;
 
 -- Enforce exactly maximum 2 members per couple space
 CREATE OR REPLACE FUNCTION public.check_max_couple_members()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     current_count INTEGER;
 BEGIN
@@ -80,14 +85,17 @@ CREATE TRIGGER trg_check_max_couple_members
 
 -- Helper function: check if a user is a member of a space
 CREATE OR REPLACE FUNCTION public.is_space_member(p_space_id UUID, p_user_id UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.couple_members
         WHERE space_id = p_space_id AND user_id = p_user_id
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
 -- ------------------------------------------------------------------------------
 -- 4. INVITATIONS TABLE
@@ -109,14 +117,13 @@ ALTER TABLE public.invitations ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
 -- 5. PHOTOS TABLE
--- Shared photo album storing couple memories and metadata
+-- Shared photo album storing couple memories and metadata (PRIVATE STORAGE)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.photos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     space_id UUID NOT NULL REFERENCES public.couple_spaces(id) ON DELETE CASCADE,
     uploaded_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    storage_path TEXT NOT NULL,
-    public_url TEXT NOT NULL,
+    storage_path TEXT NOT NULL, -- Format: {space_id}/{filename}
     caption TEXT DEFAULT '',
     is_favorite BOOLEAN NOT NULL DEFAULT false,
     taken_at TIMESTAMPTZ,
@@ -145,7 +152,10 @@ ALTER TABLE public.photo_rotation ENABLE ROW LEVEL SECURITY;
 
 -- Hourly photo rotation deterministic engine
 CREATE OR REPLACE FUNCTION public.get_or_rotate_current_photo(p_space_id UUID)
-RETURNS JSONB AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     current_slot TEXT;
     rec_rotation RECORD;
@@ -210,7 +220,7 @@ BEGIN
 
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
 -- ------------------------------------------------------------------------------
 -- 7. MOODS TABLE
@@ -261,7 +271,7 @@ ALTER TABLE public.daily_questions ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
 -- 10. QUESTION ANSWERS TABLE
--- Stored answers. Note: partner answer is hidden until both have answered!
+-- Mutual reveal protection: Partner's answer is concealed until both have answered
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.question_answers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -359,7 +369,10 @@ ALTER TABLE public.notification_preferences ENABLE ROW LEVEL SECURITY;
 -- AUTOMATIC PROFILE CREATION TRIGGER
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     INSERT INTO public.profiles (id, email, full_name, nickname)
     VALUES (
@@ -377,7 +390,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -385,14 +398,158 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ==============================================================================
+-- ATOMIC COUPLE CREATION & PAIRING FUNCTIONS (Eliminates Race Conditions)
+-- ==============================================================================
+
+-- 1. Create Couple Space (Atomic with creator binding)
+CREATE OR REPLACE FUNCTION public.create_couple_space(
+    p_name TEXT,
+    p_relationship_start_date DATE
+)
+RETURNS JSONB
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_raw_token TEXT;
+    v_token_hash TEXT;
+    v_space_id UUID;
+BEGIN
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
+    -- Check if user is already in a space
+    IF EXISTS (SELECT 1 FROM public.couple_members WHERE user_id = v_user_id) THEN
+        RAISE EXCEPTION 'User already belongs to a couple space';
+    END IF;
+
+    -- Generate a cryptographically secure 48-char hex token
+    v_raw_token := encode(gen_random_bytes(24), 'hex');
+    -- Store only the SHA-256 hash
+    v_token_hash := encode(sha256(v_raw_token::bytea), 'hex');
+
+    -- Insert space
+    INSERT INTO public.couple_spaces (name, relationship_start_date, widget_token_hash, created_by)
+    VALUES (COALESCE(NULLIF(trim(p_name), ''), 'Our Little World'), COALESCE(p_relationship_start_date, CURRENT_DATE), v_token_hash, v_user_id)
+    RETURNING id INTO v_space_id;
+
+    -- Insert creator member
+    INSERT INTO public.couple_members (space_id, user_id, role)
+    VALUES (v_space_id, v_user_id, 'creator');
+
+    -- Return space details along with the ONE-TIME raw widget token for user setup
+    RETURN jsonb_build_object(
+        'space_id', v_space_id,
+        'name', p_name,
+        'widget_token', v_raw_token
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- 2. Redeem Invitation (Atomic pairing with lock)
+CREATE OR REPLACE FUNCTION public.redeem_invitation(
+    p_invitation_code TEXT
+)
+RETURNS JSONB
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_invite RECORD;
+    v_clean_code TEXT := upper(trim(p_invitation_code));
+BEGIN
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
+    -- Check if user already in a space
+    IF EXISTS (SELECT 1 FROM public.couple_members WHERE user_id = v_user_id) THEN
+        RAISE EXCEPTION 'You already belong to a couple space.';
+    END IF;
+
+    -- Atomically select and lock the invitation
+    SELECT * INTO v_invite
+    FROM public.invitations
+    WHERE invitation_code = v_clean_code
+      AND is_used = false
+      AND expires_at > timezone('utc'::text, now())
+    FOR UPDATE;
+
+    IF v_invite.id IS NULL THEN
+        RAISE EXCEPTION 'Invalid, expired, or already used invitation code.';
+    END IF;
+
+    IF v_invite.created_by = v_user_id THEN
+        RAISE EXCEPTION 'You cannot redeem your own invitation.';
+    END IF;
+
+    -- Mark invitation as redeemed
+    UPDATE public.invitations
+    SET is_used = true,
+        used_by = v_user_id,
+        used_at = timezone('utc'::text, now())
+    WHERE id = v_invite.id;
+
+    -- Insert as partner
+    INSERT INTO public.couple_members (space_id, user_id, role)
+    VALUES (v_invite.space_id, v_user_id, 'partner');
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'space_id', v_invite.space_id
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3. Rotate Widget Access Token
+CREATE OR REPLACE FUNCTION public.rotate_widget_token(p_space_id UUID)
+RETURNS TEXT
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_new_raw_token TEXT;
+    v_new_hash TEXT;
+BEGIN
+    -- Verify caller is a member of the space
+    IF NOT public.is_space_member(p_space_id, v_user_id) THEN
+        RAISE EXCEPTION 'Unauthorized';
+    END IF;
+
+    v_new_raw_token := encode(gen_random_bytes(24), 'hex');
+    v_new_hash := encode(sha256(v_new_raw_token::bytea), 'hex');
+
+    UPDATE public.couple_spaces
+    SET widget_token_hash = v_new_hash,
+        widget_token_created_at = timezone('utc'::text, now()),
+        widget_token_expires_at = timezone('utc'::text, now()) + INTERVAL '365 days',
+        updated_at = timezone('utc'::text, now())
+    WHERE id = p_space_id;
+
+    RETURN v_new_raw_token;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 
--- PROFILES
-CREATE POLICY "Profiles are viewable by authenticated users"
+-- PROFILES: Only self and partner can view profile details
+CREATE POLICY "Profiles are viewable by self and partner"
     ON public.profiles FOR SELECT
     TO authenticated
-    USING (true);
+    USING (
+        id = auth.uid() OR
+        EXISTS (
+            SELECT 1 FROM public.couple_members cm1
+            JOIN public.couple_members cm2 ON cm1.space_id = cm2.space_id
+            WHERE cm1.user_id = auth.uid() AND cm2.user_id = profiles.id
+        )
+    );
 
 CREATE POLICY "Users can update their own profile"
     ON public.profiles FOR UPDATE
@@ -406,17 +563,12 @@ CREATE POLICY "Users can view couple spaces they belong to"
     TO authenticated
     USING (public.is_space_member(id, auth.uid()));
 
-CREATE POLICY "Users can create couple spaces"
-    ON public.couple_spaces FOR INSERT
-    TO authenticated
-    WITH CHECK (auth.uid() = created_by);
-
 CREATE POLICY "Members can update their couple space"
     ON public.couple_spaces FOR UPDATE
     TO authenticated
     USING (public.is_space_member(id, auth.uid()));
 
--- COUPLE MEMBERS
+-- COUPLE MEMBERS: Read only for space members; writes handled securely via RPC
 CREATE POLICY "Users can view members of their couple space"
     ON public.couple_members FOR SELECT
     TO authenticated
@@ -425,32 +577,16 @@ CREATE POLICY "Users can view members of their couple space"
         public.is_space_member(space_id, auth.uid())
     );
 
-CREATE POLICY "Authenticated users can join couple spaces via invite or creation"
-    ON public.couple_members FOR INSERT
-    TO authenticated
-    WITH CHECK (
-        user_id = auth.uid()
-    );
-
 -- INVITATIONS
 CREATE POLICY "Members can view invitations for their space"
     ON public.invitations FOR SELECT
     TO authenticated
-    USING (
-        public.is_space_member(space_id, auth.uid()) OR
-        is_used = false -- Allows potential joiner to lookup by code
-    );
+    USING (public.is_space_member(space_id, auth.uid()));
 
 CREATE POLICY "Members can create invitations"
     ON public.invitations FOR INSERT
     TO authenticated
     WITH CHECK (public.is_space_member(space_id, auth.uid()) AND created_by = auth.uid());
-
-CREATE POLICY "Invitations can be updated when redeemed"
-    ON public.invitations FOR UPDATE
-    TO authenticated
-    USING (true)
-    WITH CHECK (true);
 
 -- PHOTOS
 CREATE POLICY "Members can view photos in their space"
@@ -512,8 +648,7 @@ CREATE POLICY "Daily questions are viewable by authenticated users"
     TO authenticated
     USING (true);
 
--- QUESTION ANSWERS: Reveal logic!
--- You can view your own answer OR your partner's answer IF you have answered this question yourself!
+-- QUESTION ANSWERS: Mutual reveal enforced strictly in database!
 CREATE POLICY "Question answers viewable with mutual reveal"
     ON public.question_answers FOR SELECT
     TO authenticated
@@ -592,12 +727,51 @@ CREATE POLICY "Users can manage their notification preferences"
     WITH CHECK (user_id = auth.uid());
 
 -- ==============================================================================
+-- PRIVATE STORAGE BUCKET & STORAGE POLICIES
+-- ==============================================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('photos', 'photos', false, 20971520, ARRAY['image/jpeg', 'image/png', 'image/webp'])
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+CREATE POLICY "Allow members to upload photos to own space folder"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'photos' AND
+        (storage.foldername(name))[1]::uuid IN (
+            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Allow members to read photos from own space folder"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+        bucket_id = 'photos' AND
+        (storage.foldername(name))[1]::uuid IN (
+            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Allow uploader to delete own photo"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (
+        bucket_id = 'photos' AND
+        (storage.foldername(name))[1]::uuid IN (
+            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        ) AND
+        owner = auth.uid()
+    );
+
+-- ==============================================================================
 -- WIDGET SNAPSHOT FUNCTION (Called by Scriptable iOS Widget via RPC)
--- Uses widget_access_token to fetch consolidated data in ONE single request!
+-- Validates SHA-256 hash of widget token; returns snapshot with photo storage_path
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.get_widget_snapshot(p_widget_token TEXT)
-RETURNS JSONB AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
+    v_token_hash TEXT;
     v_space RECORD;
     v_member_1 RECORD;
     v_member_2 RECORD;
@@ -618,10 +792,22 @@ DECLARE
     v_user2_answered BOOLEAN := false;
     v_result JSONB;
 BEGIN
-    -- Validate token
-    SELECT * INTO v_space FROM public.couple_spaces WHERE widget_access_token = p_widget_token;
+    -- Verify input length
+    IF p_widget_token IS NULL OR length(trim(p_widget_token)) < 24 THEN
+        RETURN jsonb_build_object('error', 'Invalid widget token format');
+    END IF;
+
+    -- Compute SHA-256 hash of the provided widget token
+    v_token_hash := encode(sha256(trim(p_widget_token)::bytea), 'hex');
+
+    -- Validate against active, non-expired tokens
+    SELECT * INTO v_space 
+    FROM public.couple_spaces 
+    WHERE widget_token_hash = v_token_hash
+      AND (widget_token_expires_at IS NULL OR widget_token_expires_at > timezone('utc'::text, now()));
+
     IF v_space.id IS NULL THEN
-        RETURN jsonb_build_object('error', 'Invalid widget token');
+        RETURN jsonb_build_object('error', 'Invalid or expired widget token');
     END IF;
 
     -- Fetch members
@@ -641,7 +827,7 @@ BEGIN
     ORDER BY cm.joined_at DESC
     LIMIT 1;
 
-    -- Fetch current rotated photo
+    -- Fetch current rotated photo (returns photo metadata including storage_path)
     v_photo := public.get_or_rotate_current_photo(v_space.id);
 
     -- Fetch latest mood for member 1
@@ -820,7 +1006,14 @@ BEGIN
 
     RETURN v_result;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
 -- Grant execute to anon and authenticated for the widget endpoint
 GRANT EXECUTE ON FUNCTION public.get_widget_snapshot(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_couple_space(TEXT, DATE) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.redeem_invitation(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.rotate_widget_token(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_or_rotate_current_photo(UUID) TO authenticated;
+
+-- Add Supabase Realtime publication
+ALTER PUBLICATION supabase_realtime ADD TABLE public.messages, public.moods, public.location_updates, public.virtual_interactions, public.photos, public.question_answers;

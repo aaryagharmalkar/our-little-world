@@ -15,7 +15,10 @@ export const WidgetPreviewTab: React.FC = () => {
   const latestMsg = messages.length > 0 ? messages[messages.length - 1] : null
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co'
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-  const widgetToken = coupleSpace?.widget_access_token || 'olw_demo_token_8899aabbcc'
+  const widgetToken =
+    coupleSpace?.widget_access_token ||
+    (coupleSpace?.id ? localStorage.getItem(`widget_token_${coupleSpace.id}`) : null) ||
+    'olw_demo_token_8899aabbcc'
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin
 
   const widgetScriptCode = `// Variables used by Scriptable.
@@ -88,7 +91,7 @@ const CONFIG = {
 
             <div className="w-full h-[74px] rounded-2xl overflow-hidden bg-warm-200 border border-warm-300/40">
               {currentHourlyPhoto ? (
-                <img src={currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
+                <img src={currentHourlyPhoto.signed_url || currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-warm-400">Photo</div>
               )}
@@ -108,7 +111,7 @@ const CONFIG = {
             {/* Left Photo */}
             <div className="w-[130px] h-[132px] rounded-2xl overflow-hidden bg-warm-200 border border-warm-300/50 shrink-0">
               {currentHourlyPhoto ? (
-                <img src={currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
+                <img src={currentHourlyPhoto.signed_url || currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-warm-400">Memory</div>
               )}
@@ -151,7 +154,7 @@ const CONFIG = {
             {/* Top Photo */}
             <div className="w-full h-[140px] rounded-2xl overflow-hidden bg-warm-200 border border-warm-300/50">
               {currentHourlyPhoto ? (
-                <img src={currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
+                <img src={currentHourlyPhoto.signed_url || currentHourlyPhoto.public_url} alt="Widget" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-warm-400">Photo</div>
               )}

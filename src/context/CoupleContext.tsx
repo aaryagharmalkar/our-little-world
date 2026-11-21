@@ -26,7 +26,7 @@ import {
   DEMO_COUPLE_SPACE,
 } from '../lib/demoData'
 import { calculateHaversineDistance, calculateDistanceTrend } from '../lib/geo'
-import { uploadPhotoToStorage } from '../lib/storage'
+import { uploadPhotoToStorage, getPrivatePhotoSignedUrl } from '../lib/storage'
 
 interface CoupleContextType {
   photos: Photo[]
@@ -65,10 +65,11 @@ interface CoupleContextType {
   updateLocation: (lat: number, lon: number, accuracy?: number) => Promise<void>
   toggleLocationPause: () => Promise<void>
   createSpecialDate: (title: string, eventDate: string, isAnnual: boolean, icon: string) => Promise<void>
-  createCoupleSpace: (name: string, startDate: string) => Promise<{ success: boolean; error?: string }>
+  createCoupleSpace: (name: string, startDate: string) => Promise<{ success: boolean; error?: string; widgetToken?: string }>
   joinCoupleSpace: (code: string) => Promise<{ success: boolean; error?: string }>
   generateInviteCode: () => Promise<string | null>
   rotateHourlyPhoto: () => Promise<void>
+  rotateWidgetToken: () => Promise<string | null>
 }
 
 const CoupleContext = createContext<CoupleContextType | undefined>(undefined)
@@ -149,22 +150,35 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsLoadingData(true)
       const spaceId = coupleSpace.id
 
-      // 1. Photos
+      // 1. Photos (resolve secure signed URLs for private storage)
       const { data: photosData } = await supabase
         .from('photos')
         .select('*')
         .eq('space_id', spaceId)
         .order('created_at', { ascending: false })
-      if (photosData) setPhotos(photosData)
+
+      if (photosData) {
+        const resolved: Photo[] = await Promise.all(
+          photosData.map(async (p) => {
+            const signed = await getPrivatePhotoSignedUrl(p.storage_path || p.public_url || '')
+            return { ...p, signed_url: signed, public_url: signed }
+          })
+        )
+        setPhotos(resolved)
+      }
 
       // 2. Hourly Photo Rotation
       const { data: rotationPhoto } = await supabase.rpc('get_or_rotate_current_photo', {
         p_space_id: spaceId,
       })
       if (rotationPhoto) {
-        setCurrentHourlyPhoto(rotationPhoto as Photo)
+        const rot = rotationPhoto as Photo
+        const signed = await getPrivatePhotoSignedUrl(rot.storage_path || rot.public_url || '')
+        setCurrentHourlyPhoto({ ...rot, signed_url: signed, public_url: signed })
       } else if (photosData && photosData.length > 0) {
-        setCurrentHourlyPhoto(photosData[0])
+        const first = photosData[0] as Photo
+        const signed = await getPrivatePhotoSignedUrl(first.storage_path || first.public_url || '')
+        setCurrentHourlyPhoto({ ...first, signed_url: signed, public_url: signed })
       }
 
       // 3. Moods
@@ -445,13 +459,12 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       let uploadedCount = 0
       for (const file of files) {
-        const { path, publicUrl, width, height } = await uploadPhotoToStorage(coupleSpace.id, file)
+        const { path, width, height } = await uploadPhotoToStorage(coupleSpace.id, file)
 
         const { error: dbError } = await supabase.from('photos').insert({
           space_id: coupleSpace.id,
           uploaded_by: user.id,
           storage_path: path,
-          public_url: publicUrl,
           caption: caption || '',
           width,
           height,
@@ -461,13 +474,22 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!dbError) uploadedCount++
       }
 
-      // Refresh list
+      // Refresh list with signed URLs
       const { data } = await supabase
         .from('photos')
         .select('*')
         .eq('space_id', coupleSpace.id)
         .order('created_at', { ascending: false })
-      if (data) setPhotos(data)
+
+      if (data) {
+        const resolved: Photo[] = await Promise.all(
+          data.map(async (p) => {
+            const signed = await getPrivatePhotoSignedUrl(p.storage_path || p.public_url || '')
+            return { ...p, signed_url: signed, public_url: signed }
+          })
+        )
+        setPhotos(resolved)
+      }
 
       return { success: true, count: uploadedCount }
     } catch (err: unknown) {
@@ -724,55 +746,60 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }
 
-  // 11. Create Couple Space
+  // 11. Create Couple Space (Atomic PostgreSQL function with token generation)
   const createCoupleSpace = async (name: string, startDate: string) => {
     if (!user) return { success: false, error: 'User must be authenticated' }
 
     if (isDemoMode) {
+      const demoToken = `olw_${Math.random().toString(36).substring(2, 12)}`
       const newSpace: CoupleSpace = {
         id: `space-${Date.now()}`,
         name: name || 'Our Little World ♡',
         relationship_start_date: startDate,
-        widget_access_token: `olw_${Math.random().toString(36).substring(2, 12)}`,
+        widget_access_token: demoToken,
         created_by: user.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }
       setCoupleSpace(newSpace)
-      return { success: true }
+      return { success: true, widgetToken: demoToken }
     }
 
     try {
-      const { data: space, error: spaceErr } = await supabase
-        .from('couple_spaces')
-        .insert({
-          name: name || 'Our Little World',
-          relationship_start_date: startDate,
-          created_by: user.id,
-        })
-        .select()
-        .single()
-
-      if (spaceErr) throw spaceErr
-
-      // Add creator as member
-      const { error: memberErr } = await supabase.from('couple_members').insert({
-        space_id: space.id,
-        user_id: user.id,
-        role: 'creator',
+      const { data, error } = await supabase.rpc('create_couple_space', {
+        p_name: name || 'Our Little World',
+        p_relationship_start_date: startDate,
       })
 
-      if (memberErr) throw memberErr
+      if (error) throw error
 
-      setCoupleSpace(space)
-      return { success: true }
+      const rawToken = data?.widget_token
+      if (rawToken && data?.space_id) {
+        localStorage.setItem(`widget_token_${data.space_id}`, rawToken)
+      }
+
+      // Fetch space
+      const { data: space } = await supabase
+        .from('couple_spaces')
+        .select('*')
+        .eq('id', data.space_id)
+        .single()
+
+      if (space) {
+        setCoupleSpace({
+          ...space,
+          widget_access_token: rawToken,
+        })
+      }
+
+      return { success: true, widgetToken: rawToken }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create space'
       return { success: false, error: msg }
     }
   }
 
-  // 12. Join Couple Space with single-use invitation code
+  // 12. Join Couple Space (Atomic redemption with row lock)
   const joinCoupleSpace = async (code: string) => {
     if (!user) return { success: false, error: 'User must be authenticated' }
     const cleanCode = code.trim().toUpperCase()
@@ -783,44 +810,63 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     try {
-      // Find invitation
-      const { data: invite, error: inviteErr } = await supabase
-        .from('invitations')
-        .select('*, couple_spaces (*)')
-        .eq('invitation_code', cleanCode)
-        .eq('is_used', false)
-        .gt('expires_at', new Date().toISOString())
-        .single()
-
-      if (inviteErr || !invite) {
-        return { success: false, error: 'Invalid or expired invitation code' }
-      }
-
-      // Add as partner member
-      const { error: memberErr } = await supabase.from('couple_members').insert({
-        space_id: invite.space_id,
-        user_id: user.id,
-        role: 'partner',
+      const { data, error } = await supabase.rpc('redeem_invitation', {
+        p_invitation_code: cleanCode,
       })
 
-      if (memberErr) throw memberErr
+      if (error) {
+        return { success: false, error: error.message || 'Invalid or expired invitation code' }
+      }
 
-      // Mark invite as used
-      await supabase
-        .from('invitations')
-        .update({
-          is_used: true,
-          used_by: user.id,
-          used_at: new Date().toISOString(),
-        })
-        .eq('id', invite.id)
+      if (data?.space_id) {
+        const { data: space } = await supabase
+          .from('couple_spaces')
+          .select('*')
+          .eq('id', data.space_id)
+          .single()
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setCoupleSpace(invite.couple_spaces as any)
+        if (space) {
+          const cachedToken = localStorage.getItem(`widget_token_${space.id}`)
+          setCoupleSpace({
+            ...space,
+            widget_access_token: cachedToken || undefined,
+          })
+        }
+      }
+
       return { success: true }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to join space'
       return { success: false, error: msg }
+    }
+  }
+
+  // 13. Rotate Widget Access Token
+  const rotateWidgetToken = async (): Promise<string | null> => {
+    if (!coupleSpace) return null
+
+    if (isDemoMode) {
+      const newToken = `olw_${Math.random().toString(36).substring(2, 12)}`
+      setCoupleSpace({ ...coupleSpace, widget_access_token: newToken })
+      return newToken
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('rotate_widget_token', {
+        p_space_id: coupleSpace.id,
+      })
+
+      if (error) {
+        console.error('Failed to rotate token:', error)
+        return null
+      }
+
+      localStorage.setItem(`widget_token_${coupleSpace.id}`, data)
+      setCoupleSpace({ ...coupleSpace, widget_access_token: data })
+      return data
+    } catch (err) {
+      console.error('Error rotating widget token:', err)
+      return null
     }
   }
 
@@ -894,6 +940,7 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         joinCoupleSpace,
         generateInviteCode,
         rotateHourlyPhoto,
+        rotateWidgetToken,
       }}
     >
       {children}

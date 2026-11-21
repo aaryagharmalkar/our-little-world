@@ -1,5 +1,8 @@
 import { supabase } from './supabase'
 
+// In-memory cache for signed URLs so we don't repeat network roundtrips on every component re-render
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
+
 /**
  * Compresses an image file client-side using an offscreen canvas
  * Keeps maximum dimension at 1920px and outputs a clean JPEG
@@ -55,20 +58,21 @@ export async function compressImage(file: File, maxDimension = 1920, quality = 0
 }
 
 /**
- * Uploads a photo to Supabase Storage bucket 'photos'
+ * Uploads a photo to the PRIVATE Supabase Storage bucket 'photos'
+ * Path structure: {spaceId}/{timestamp}_{random}.jpg
  */
 export async function uploadPhotoToStorage(
   spaceId: string,
   file: File,
   onProgress?: (progress: number) => void
-): Promise<{ path: string; publicUrl: string; width: number; height: number }> {
+): Promise<{ path: string; width: number; height: number }> {
   onProgress?.(10)
   
-  // Compress image
+  // Compress image client-side
   const compressedBlob = await compressImage(file)
   onProgress?.(40)
 
-  // File naming: {spaceId}/{timestamp}_{random}.jpg
+  // Enforce space-scoped storage path
   const filename = `${spaceId}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.jpg`
 
   const { data, error } = await supabase.storage
@@ -84,21 +88,54 @@ export async function uploadPhotoToStorage(
     throw new Error(`Upload failed: ${error.message}`)
   }
 
-  const { data: publicUrlData } = supabase.storage
-    .from('photos')
-    .getPublicUrl(data.path)
-
-  onProgress?.(100)
-
   // Measure dimensions
   const dimensions = await getImageDimensions(URL.createObjectURL(compressedBlob))
+  onProgress?.(100)
 
   return {
     path: data.path,
-    publicUrl: publicUrlData.publicUrl,
     width: dimensions.width,
     height: dimensions.height,
   }
+}
+
+/**
+ * Creates a secure, time-limited signed URL for a private photo
+ * Uses client-side cache with 10-minute safety margin before expiry
+ */
+export async function getPrivatePhotoSignedUrl(
+  storagePath: string,
+  expiresInSeconds = 7200 // 2 hours
+): Promise<string> {
+  if (!storagePath) return ''
+
+  // If already an HTTP URL (e.g. Unsplash demo photos or external previews)
+  if (storagePath.startsWith('http://') || storagePath.startsWith('https://') || storagePath.startsWith('blob:')) {
+    return storagePath
+  }
+
+  const now = Date.now()
+  const cached = signedUrlCache.get(storagePath)
+  // If cache is valid for more than 10 minutes, return cached
+  if (cached && cached.expiresAt > now + 10 * 60 * 1000) {
+    return cached.url
+  }
+
+  const { data, error } = await supabase.storage
+    .from('photos')
+    .createSignedUrl(storagePath, expiresInSeconds)
+
+  if (error || !data?.signedUrl) {
+    console.error('Failed to create signed URL for path:', storagePath, error)
+    return ''
+  }
+
+  signedUrlCache.set(storagePath, {
+    url: data.signedUrl,
+    expiresAt: now + expiresInSeconds * 1000,
+  })
+
+  return data.signedUrl
 }
 
 function getImageDimensions(url: string): Promise<{ width: number; height: number }> {

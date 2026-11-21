@@ -91,7 +91,7 @@ export const DashboardTab: React.FC<Props> = ({ onOpenPhotoLightbox, onOpenUploa
           {currentHourlyPhoto ? (
             <>
               <img
-                src={currentHourlyPhoto.public_url}
+                src={currentHourlyPhoto.signed_url || currentHourlyPhoto.public_url}
                 alt="Shared memory"
                 className="w-full h-full object-cover object-center transform group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                 fetchPriority="high"

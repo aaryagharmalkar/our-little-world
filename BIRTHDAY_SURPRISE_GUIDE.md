@@ -32,12 +32,13 @@ This guide is designed for preparing the surprise on your **Windows 11 laptop** 
 4. Open `supabase/seed_questions.sql`, paste into the SQL editor, and click **Run**.
    - *This seeds 50 romantic and thoughtful Questions of the Day.*
 
-### 1.3 Create Storage Bucket for Photos
+### 1.3 Create Private Storage Bucket for Photos
 1. In the Supabase dashboard, go to **Storage** on the left menu.
 2. Click **New bucket**.
 3. Set Bucket name to: `photos`.
-4. Toggle **Public bucket** to `ON` (so images can be rendered in the Scriptable widget without complex signing).
+4. Keep **Public bucket** set to `OFF` (**Private bucket** - your photos are protected and only accessible to you two via signed URLs!).
 5. Click **Save**.
+*(The database migration in Step 1.2 automatically applies Row Level Security policies to this bucket).*
 
 ### 1.4 Configure Local Environment
 In your project folder `c:\Github\Us`:
