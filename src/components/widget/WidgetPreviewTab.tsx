@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { Smartphone, Copy, Check, Sparkles, Heart, Code } from 'lucide-react'
+import { Smartphone, Copy, Check, Sparkles, Heart, Code, Zap } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useCouple } from '../../context/CoupleContext'
 import { formatDistance } from '../../lib/geo'
+import { generateFullWidgetScript } from '../../lib/widgetScriptTemplate'
 
 export const WidgetPreviewTab: React.FC = () => {
   const { coupleSpace, profile, partnerProfile } = useAuth()
@@ -21,22 +22,15 @@ export const WidgetPreviewTab: React.FC = () => {
     'olw_demo_token_8899aabbcc'
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin
 
-  const widgetScriptCode = `// Variables used by Scriptable.
-// icon-color: pink; icon-glyph: heart;
-
-// Generated for: ${coupleSpace?.name || 'Our Little World ♡'}
-const CONFIG = {
-  supabaseUrl: "${supabaseUrl}",
-  supabaseAnonKey: "${supabaseKey}",
-  widgetToken: "${widgetToken}",
-  appBaseUrl: "${appUrl}",
-};
-
-// Paste the rest of OurLittleWorldWidget.js or load via Scriptable!
-`
+  const fullScriptCode = generateFullWidgetScript({
+    supabaseUrl,
+    supabaseAnonKey: supabaseKey,
+    widgetToken,
+    appBaseUrl: appUrl,
+  })
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(widgetScriptCode)
+    navigator.clipboard.writeText(fullScriptCode)
     setCopiedCode(true)
     setTimeout(() => setCopiedCode(false), 2000)
   }
@@ -224,11 +218,34 @@ const CONFIG = {
           </button>
           <button
             onClick={handleCopyCode}
-            className="p-2 rounded-xl bg-blush-50 hover:bg-blush-100 text-blush-700 border border-blush-200 text-xs flex items-center gap-1 transition-colors"
+            className="p-2 rounded-xl bg-blush-50 hover:bg-blush-100 text-blush-700 border border-blush-200 text-xs flex items-center gap-1 transition-colors font-medium"
           >
             {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Code className="w-3.5 h-3.5" />}
-            <span>{copiedCode ? 'Copied' : 'Copy Config'}</span>
+            <span>{copiedCode ? 'Full Script Copied!' : 'Copy Full Script'}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Production-Ready Behavior Card */}
+      <div className="bg-white rounded-3xl p-5 shadow-soft border border-warm-200/70 space-y-3 font-sans">
+        <div className="flex items-center gap-2 pb-2 border-b border-warm-100">
+          <Zap className="w-4 h-4 text-emerald-600" />
+          <h3 className="font-serif text-base font-medium text-warm-900">
+            How Automatic Updates Work (Zero-Touch)
+          </h3>
+        </div>
+
+        <p className="text-xs text-warm-600 leading-relaxed">
+          <strong>1. 100% Background Automatic:</strong> Once added to your Home Screen, Apple's iOS WidgetKit automatically executes the script headlessly every ~15 minutes. You <em>never</em> need to open Scriptable or click Play.
+        </p>
+
+        <p className="text-xs text-warm-600 leading-relaxed">
+          <strong>2. Instant 1-Second Turbo (Optional):</strong> If you want the widget to update the exact millisecond you close the app after updating your mood:
+        </p>
+        <div className="bg-sand-50 p-3 rounded-2xl border border-sand-200 text-[11px] text-warm-700 space-y-1">
+          <p>• Open Apple's <strong>Shortcuts</strong> app ➔ tap <strong>Automation</strong> tab ➔ <strong>+</strong></p>
+          <p>• Select <strong>App</strong> ➔ choose <strong>"Our World"</strong> ➔ check <strong>Is Closed</strong> ➔ <strong>Run Immediately</strong></p>
+          <p>• Action: <strong>Scriptable ➔ Run Script</strong> ➔ select <strong>"Our Little World"</strong> ➔ turn <strong>Run in Background ON</strong></p>
         </div>
       </div>
 
@@ -244,16 +261,16 @@ const CONFIG = {
             Install the free <strong>Scriptable</strong> app from the iOS App Store.
           </li>
           <li>
-            Open Scriptable, tap the <strong>+</strong> button at top right to create a new script, and name it <strong>Our Little World</strong>.
+            Tap <strong>Copy Full Script</strong> above (it already has your unique tokens pre-configured!).
           </li>
           <li>
-            Copy the complete script from <code className="bg-white px-1 py-0.5 rounded text-blush-700 font-mono">widget/OurLittleWorldWidget.js</code> and paste it in.
+            Open Scriptable, tap <strong>+</strong>, paste the script, and tap the title at top to name it <strong>Our Little World</strong>. Tap Done.
           </li>
           <li>
-            Go to your iPhone Home Screen, enter jiggle mode, tap <strong>+</strong>, search for <strong>Scriptable</strong>, and add a Medium or Large widget.
+            Go to your iPhone Home Screen, long-press empty space until icons jiggle, tap <strong>+</strong> at the top left, search for <strong>Scriptable</strong>, and add the <strong>Medium</strong> widget.
           </li>
           <li>
-            Long-press the widget, tap <strong>Edit Widget</strong>, choose <strong>Our Little World</strong> as the script, and set <strong>When Interacting</strong> to Open URL!
+            Long-press the widget on your home screen, tap <strong>Edit Widget</strong>, choose <strong>Our Little World</strong> as the script, and you are done! It now updates seamlessly on its own.
           </li>
         </ol>
       </div>
