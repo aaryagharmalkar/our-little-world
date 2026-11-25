@@ -34,11 +34,13 @@ export const AuthModal: React.FC<Props> = ({ isOpen, onClose }) => {
       }
     } else {
       const res = await signup(email, password, fullName, nickname)
-      setIsLoading(false)
       if (res.error) {
+        setIsLoading(false)
         setErrorMsg(res.error)
       } else {
-        alert('Check your email for confirmation link!')
+        // Seamless instant login after signup
+        await login(email, password)
+        setIsLoading(false)
         onClose()
       }
     }

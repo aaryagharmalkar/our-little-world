@@ -19,10 +19,10 @@
 // Or hardcode your values below for zero-setup convenience:
 // ------------------------------------------------------------------------------
 const DEFAULT_CONFIG = {
-  supabaseUrl: "https://your-project-id.supabase.co", // Replace with your Supabase URL
-  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", // Replace with your Supabase Anon Key
-  widgetToken: "olw_demo_token_8899aabbcc", // Replace with your Couple Space Widget Token
-  appBaseUrl: "https://our-little-world.vercel.app", // Companion web app URL for deep links
+  supabaseUrl: "https://wikztmzuyjtxnpjlctrt.supabase.co", // Live Supabase project URL
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indpa3p0bXp1eWp0eG5wamxjdHJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU2MTY0MjksImV4cCI6MjExMTE5MjQyOX0.6xJIWSeY9sJEsQLuwm2jogGubqaLMICs04aiTupPdMo", // Live Supabase Anon Key
+  widgetToken: "REPLACE_WITH_YOUR_WIDGET_TOKEN", // Couple Space Widget Token (copied from app Settings)
+  appBaseUrl: "https://aaryagharmalkar.github.io/our-little-world", // Companion web app URL for deep links
 };
 
 // Parse parameter if passed from iOS widget settings

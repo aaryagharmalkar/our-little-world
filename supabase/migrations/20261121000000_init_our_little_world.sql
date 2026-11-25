@@ -77,11 +77,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_check_max_couple_members ON public.couple_members;
-CREATE TRIGGER trg_check_max_couple_members
-    BEFORE INSERT ON public.couple_members
-    FOR EACH ROW
-    EXECUTE FUNCTION public.check_max_couple_members();
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_check_max_couple_members') THEN 
+        CREATE TRIGGER trg_check_max_couple_members
+            BEFORE INSERT ON public.couple_members
+            FOR EACH ROW
+            EXECUTE FUNCTION public.check_max_couple_members();
+    END IF; 
+END $$;
 
 -- Helper function: check if a user is a member of a space
 CREATE OR REPLACE FUNCTION public.is_space_member(p_space_id UUID, p_user_id UUID)
@@ -392,10 +396,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'on_auth_user_created') THEN 
+        CREATE TRIGGER on_auth_user_created
+            AFTER INSERT ON auth.users
+            FOR EACH ROW 
+            EXECUTE FUNCTION public.handle_new_user();
+    END IF; 
+END $$;
 
 -- ==============================================================================
 -- ATOMIC COUPLE CREATION & PAIRING FUNCTIONS (Eliminates Race Conditions)
@@ -737,8 +746,8 @@ CREATE POLICY "Allow members to upload photos to own space folder"
     ON storage.objects FOR INSERT TO authenticated
     WITH CHECK (
         bucket_id = 'photos' AND
-        (storage.foldername(name))[1]::uuid IN (
-            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        (storage.foldername(name))[1] IN (
+            SELECT space_id::text FROM public.couple_members WHERE user_id = auth.uid()
         )
     );
 
@@ -746,8 +755,8 @@ CREATE POLICY "Allow members to read photos from own space folder"
     ON storage.objects FOR SELECT TO authenticated
     USING (
         bucket_id = 'photos' AND
-        (storage.foldername(name))[1]::uuid IN (
-            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        (storage.foldername(name))[1] IN (
+            SELECT space_id::text FROM public.couple_members WHERE user_id = auth.uid()
         )
     );
 
@@ -755,8 +764,8 @@ CREATE POLICY "Allow uploader to delete own photo"
     ON storage.objects FOR DELETE TO authenticated
     USING (
         bucket_id = 'photos' AND
-        (storage.foldername(name))[1]::uuid IN (
-            SELECT space_id FROM public.couple_members WHERE user_id = auth.uid()
+        (storage.foldername(name))[1] IN (
+            SELECT space_id::text FROM public.couple_members WHERE user_id = auth.uid()
         ) AND
         owner = auth.uid()
     );
@@ -1016,4 +1025,11 @@ GRANT EXECUTE ON FUNCTION public.rotate_widget_token(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_or_rotate_current_photo(UUID) TO authenticated;
 
 -- Add Supabase Realtime publication
-ALTER PUBLICATION supabase_realtime ADD TABLE public.messages, public.moods, public.location_updates, public.virtual_interactions, public.photos, public.question_answers;
+DO $$
+BEGIN
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.messages, public.moods, public.location_updates, public.virtual_interactions, public.photos, public.question_answers;
+    EXCEPTION WHEN duplicate_object THEN
+        NULL;
+    END;
+END $$;

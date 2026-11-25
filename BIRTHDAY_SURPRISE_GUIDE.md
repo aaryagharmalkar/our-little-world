@@ -15,44 +15,16 @@ This guide is designed for preparing the surprise on your **Windows 11 laptop** 
 
 ---
 
-## 🛠️ Step 1: Pre-Birthday Setup (On Windows 11)
+## 🛠️ Step 1: Backend & Database Setup (COMPLETED ✅)
 
-### 1.1 Create Free Supabase Project
-1. Go to [supabase.com](https://supabase.com) and create a free account.
-2. Click **New Project** and name it `our-little-world` (select the region nearest to both of you).
-3. Once the database is provisioned, go to **Project Settings -> API**:
-   - Copy **Project URL** (`https://xxxxxxxxxxxx.supabase.co`)
-   - Copy **Project API Key (anon / public)** (`eyJhbG...`)
-
-### 1.2 Run Database Migrations
-1. In your Supabase dashboard, open the **SQL Editor** tab on the left sidebar.
-2. Click **New query**.
-3. Open `supabase/migrations/20261121000000_init_our_little_world.sql` on your laptop, copy all contents, paste into the Supabase SQL editor, and click **Run**.
-   - *This creates all 14 tables, security policies (RLS), hourly photo rotation engine, and the widget snapshot API.*
-4. Open `supabase/seed_questions.sql`, paste into the SQL editor, and click **Run**.
-   - *This seeds 50 romantic and thoughtful Questions of the Day.*
-
-### 1.3 Create Private Storage Bucket for Photos
-1. In the Supabase dashboard, go to **Storage** on the left menu.
-2. Click **New bucket**.
-3. Set Bucket name to: `photos`.
-4. Keep **Public bucket** set to `OFF` (**Private bucket** - your photos are protected and only accessible to you two via signed URLs!).
-5. Click **Save**.
-*(The database migration in Step 1.2 automatically applies Row Level Security policies to this bucket).*
-
-### 1.4 Configure Local Environment
-In your project folder `c:\Github\Us`:
-1. Create or edit `.env`:
-```ini
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=your_anon_key_here
-VITE_APP_URL=https://your-app-domain.vercel.app
-```
-2. Run test and verify build in Windows PowerShell:
-```powershell
-npm test
-npm run build
-```
+Your live Supabase project is already provisioned, secured, and linked!
+- **Supabase Project Name:** `our-little-world`
+- **Project URL:** `https://wikztmzuyjtxnpjlctrt.supabase.co`
+- **Database Tables:** All 14 tables, triggers, and Row-Level Security policies are applied.
+- **Questions:** 30 romantic daily questions seeded and ready.
+- **Storage:** `photos` storage bucket is **100% PRIVATE** with signed URL access.
+- **Local Config:** `.env` and `widget/OurLittleWorldWidget.js` pre-configured with your live project credentials.
+- **Integration Tests:** 24/24 tests passing; production build verified.
 
 ---
 
