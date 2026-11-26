@@ -483,36 +483,49 @@ async function createLargeWidget(data, photoImg) {
 }
 
 async function run() {
-  const data = await fetchWidgetSnapshot();
-  let photoUrl = data.photo?.signed_url || data.photo?.public_url;
-  if (!photoUrl && data.photo?.storage_path) {
-    photoUrl = \`\${CONFIG.supabaseUrl}/storage/v1/object/authenticated/photos/\${data.photo.storage_path}\`;
+  try {
+    const data = await fetchWidgetSnapshot();
+    let photoUrl = data.photo?.signed_url || data.photo?.public_url;
+    if (!photoUrl && data.photo?.storage_path) {
+      photoUrl = \`\${CONFIG.supabaseUrl}/storage/v1/object/authenticated/photos/\${data.photo.storage_path}\`;
+    }
+    const photoImg = await loadPhoto(photoUrl);
+
+    let widget;
+    const family = config.widgetFamily || "medium";
+
+    if (family === "small") {
+      widget = await createSmallWidget(data, photoImg);
+    } else if (family === "large") {
+      widget = await createLargeWidget(data, photoImg);
+    } else {
+      widget = await createMediumWidget(data, photoImg);
+    }
+
+    // 5-Minute Background Timeline Reload (Aggressive iOS WidgetKit budget)
+    widget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 5);
+
+    Script.setWidget(widget);
+
+    if (!config.runsInWidget) {
+      if (family === "small") await widget.presentSmall();
+      else if (family === "large") await widget.presentLarge();
+      else await widget.presentMedium();
+    }
+  } catch (err) {
+    console.error("Widget render error: " + err);
+    try {
+      const fallbackData = getOfflineFallback();
+      const fallbackWidget = await createMediumWidget(fallbackData, null);
+      fallbackWidget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 5);
+      Script.setWidget(fallbackWidget);
+    } catch (fallbackErr) {
+      console.error("Critical fallback error: " + fallbackErr);
+    }
+  } finally {
+    // Guarantees iOS receives completion signal so WidgetKit never freezes or disables reloads
+    Script.complete();
   }
-  const photoImg = await loadPhoto(photoUrl);
-
-  let widget;
-  const family = config.widgetFamily || "medium";
-
-  if (family === "small") {
-    widget = await createSmallWidget(data, photoImg);
-  } else if (family === "large") {
-    widget = await createLargeWidget(data, photoImg);
-  } else {
-    widget = await createMediumWidget(data, photoImg);
-  }
-
-  // 15-Minute Background Timeline Reload
-  widget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 15);
-
-  Script.setWidget(widget);
-
-  if (!config.runsInWidget) {
-    if (family === "small") await widget.presentSmall();
-    else if (family === "large") await widget.presentLarge();
-    else await widget.presentMedium();
-  }
-
-  Script.complete();
 }
 
 await run();

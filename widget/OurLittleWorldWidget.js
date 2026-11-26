@@ -516,40 +516,51 @@ async function createLargeWidget(data, photoImg) {
 // SCRIPT ENTRY POINT: AUTOMATIC BACKGROUND TIMELINE EXECUTION
 // ------------------------------------------------------------------------------
 async function run() {
-  const data = await fetchWidgetSnapshot();
-  let photoUrl = data.photo?.signed_url || data.photo?.public_url;
-  if (!photoUrl && data.photo?.storage_path) {
-    photoUrl = `${CONFIG.supabaseUrl}/storage/v1/object/authenticated/photos/${data.photo.storage_path}`;
+  try {
+    const data = await fetchWidgetSnapshot();
+    let photoUrl = data.photo?.signed_url || data.photo?.public_url;
+    if (!photoUrl && data.photo?.storage_path) {
+      photoUrl = `${CONFIG.supabaseUrl}/storage/v1/object/authenticated/photos/${data.photo.storage_path}`;
+    }
+    const photoImg = await loadPhoto(photoUrl);
+
+    let widget;
+    const family = config.widgetFamily || "medium";
+
+    if (family === "small") {
+      widget = await createSmallWidget(data, photoImg);
+    } else if (family === "large") {
+      widget = await createLargeWidget(data, photoImg);
+    } else {
+      widget = await createMediumWidget(data, photoImg);
+    }
+
+    // 5-Minute Background Timeline Reload (Aggressive iOS WidgetKit budget)
+    widget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 5);
+
+    // Set widget for iOS WidgetKit
+    Script.setWidget(widget);
+
+    // If user tapped Play inside Scriptable app, show preview
+    if (!config.runsInWidget) {
+      if (family === "small") await widget.presentSmall();
+      else if (family === "large") await widget.presentLarge();
+      else await widget.presentMedium();
+    }
+  } catch (err) {
+    console.error("Widget render error: " + err);
+    try {
+      const fallbackData = getOfflineFallback();
+      const fallbackWidget = await createMediumWidget(fallbackData, null);
+      fallbackWidget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 5);
+      Script.setWidget(fallbackWidget);
+    } catch (fallbackErr) {
+      console.error("Critical fallback error: " + fallbackErr);
+    }
+  } finally {
+    // Guarantees iOS receives completion signal so WidgetKit never freezes or disables reloads
+    Script.complete();
   }
-  const photoImg = await loadPhoto(photoUrl);
-
-  let widget;
-  const family = config.widgetFamily || "medium";
-
-  if (family === "small") {
-    widget = await createSmallWidget(data, photoImg);
-  } else if (family === "large") {
-    widget = await createLargeWidget(data, photoImg);
-  } else {
-    widget = await createMediumWidget(data, photoImg);
-  }
-
-  // 15-Minute Background Reload Schedule (Apple WidgetKit background reload budget)
-  // iOS automatically executes this script headlessly every ~15 minutes without opening the app!
-  widget.refreshAfterDate = new Date(Date.now() + 1000 * 60 * 15);
-
-  // Set widget for iOS WidgetKit
-  Script.setWidget(widget);
-
-  // If user tapped Play inside Scriptable app, show preview
-  if (!config.runsInWidget) {
-    if (family === "small") await widget.presentSmall();
-    else if (family === "large") await widget.presentLarge();
-    else await widget.presentMedium();
-  }
-
-  // Tell iOS that rendering is complete
-  Script.complete();
 }
 
 await run();
