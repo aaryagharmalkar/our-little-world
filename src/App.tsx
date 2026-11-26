@@ -55,6 +55,7 @@ const MainContent: React.FC = () => {
           <DashboardTab
             onOpenUpload={() => setIsUploadOpen(true)}
             onOpenPhotoLightbox={(p) => setSelectedPhoto(p as Photo)}
+            onOpenPairing={() => setIsPairingOpen(true)}
           />
         )}
         {activeTab === 'photos' && (

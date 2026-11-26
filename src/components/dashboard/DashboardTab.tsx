@@ -19,9 +19,10 @@ import { formatDistance, formatTimeAgo, isLocationStale } from '../../lib/geo'
 interface Props {
   onOpenPhotoLightbox: (photo: unknown) => void
   onOpenUpload: () => void
+  onOpenPairing?: () => void
 }
 
-export const DashboardTab: React.FC<Props> = ({ onOpenPhotoLightbox, onOpenUpload }) => {
+export const DashboardTab: React.FC<Props> = ({ onOpenPhotoLightbox, onOpenUpload, onOpenPairing }) => {
   const { profile, partnerProfile } = useAuth()
   const {
     currentHourlyPhoto,
@@ -80,6 +81,34 @@ export const DashboardTab: React.FC<Props> = ({ onOpenPhotoLightbox, onOpenUploa
 
   return (
     <div className="space-y-5 pb-24 max-w-xl mx-auto px-4 pt-2">
+      {/* 0. PAIRING WAITING BANNER (When partner hasn't joined yet) */}
+      {!partnerProfile && onOpenPairing && (
+        <div className="bg-gradient-to-r from-blush-50 via-cream-50 to-sand-50 rounded-3xl p-4 border border-blush-200/80 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-blush-100 border border-blush-200 flex items-center justify-center text-blush-500 shadow-2xs shrink-0">
+                <Heart className="w-5 h-5 fill-blush-400 text-blush-500 animate-pulse" />
+              </div>
+              <div>
+                <h4 className="font-serif text-sm font-medium text-warm-900 flex items-center gap-1.5">
+                  <span>Waiting for your partner to join</span>
+                  <span className="text-blush-500 font-sans text-xs">♡</span>
+                </h4>
+                <p className="text-[11px] text-warm-500 font-sans">
+                  Share your link so his phone syncs with yours
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onOpenPairing}
+              className="px-3.5 py-2 rounded-xl bg-blush-500 hover:bg-blush-600 text-white text-xs font-medium shadow-sm transition-all shrink-0 active:scale-95"
+            >
+              Share Link
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ------------------------------------------------------------------ */}
       {/* 1. HERO PHOTO OF THE HOUR                                          */}
       {/* ------------------------------------------------------------------ */}

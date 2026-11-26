@@ -461,10 +461,24 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       for (const file of files) {
         const { path, width, height } = await uploadPhotoToStorage(coupleSpace.id, file)
 
+        // Generate long-lived pre-signed URL for the iOS widget (valid for 1 year)
+        let signedUrl = ''
+        try {
+          const { data: signedData } = await supabase.storage
+            .from('photos')
+            .createSignedUrl(path, 60 * 60 * 24 * 365)
+          if (signedData?.signedUrl) {
+            signedUrl = signedData.signedUrl
+          }
+        } catch (e) {
+          console.warn('Pre-signed URL generation notice:', e)
+        }
+
         const { error: dbError } = await supabase.from('photos').insert({
           space_id: coupleSpace.id,
           uploaded_by: user.id,
           storage_path: path,
+          signed_url: signedUrl,
           caption: caption || '',
           width,
           height,
@@ -484,11 +498,23 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (data) {
         const resolved: Photo[] = await Promise.all(
           data.map(async (p) => {
-            const signed = await getPrivatePhotoSignedUrl(p.storage_path || p.public_url || '')
+            const signed = p.signed_url || (await getPrivatePhotoSignedUrl(p.storage_path || p.public_url || ''))
             return { ...p, signed_url: signed, public_url: signed }
           })
         )
         setPhotos(resolved)
+
+        // Immediately update rotated photo to the newest uploaded photo
+        const { data: rotationPhoto } = await supabase.rpc('get_or_rotate_current_photo', {
+          p_space_id: coupleSpace.id,
+        })
+        if (rotationPhoto) {
+          const rot = rotationPhoto as Photo
+          const signed = rot.signed_url || (await getPrivatePhotoSignedUrl(rot.storage_path || ''))
+          setCurrentHourlyPhoto({ ...rot, signed_url: signed, public_url: signed })
+        } else if (resolved.length > 0) {
+          setCurrentHourlyPhoto(resolved[0])
+        }
       }
 
       return { success: true, count: uploadedCount }
@@ -870,33 +896,53 @@ export const CoupleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }
 
-  // 13. Generate Unique Invitation Code
+  // 13. Generate or Retrieve Active Invitation Code
   const generateInviteCode = async (): Promise<string | null> => {
     if (!coupleSpace || !user) return null
 
-    // Clean 8-character uppercase pairing code
-    const code = Math.random().toString(36).substring(2, 10).toUpperCase()
-
     if (isDemoMode) {
-      return code
+      return 'LOVE-US-2026'
     }
 
-    const { data, error } = await supabase
-      .from('invitations')
-      .insert({
-        space_id: coupleSpace.id,
-        invitation_code: code,
-        created_by: user.id,
-      })
-      .select('invitation_code')
-      .single()
+    try {
+      // First check if an active, unused code exists for this space
+      const { data: existing } = await supabase
+        .from('invitations')
+        .select('invitation_code')
+        .eq('space_id', coupleSpace.id)
+        .eq('is_used', false)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-    if (error) {
-      console.error('Error generating invite:', error)
+      if (existing?.invitation_code) {
+        return existing.invitation_code
+      }
+
+      // Clean 8-character uppercase pairing code if none exists
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase()
+      const { data, error } = await supabase
+        .from('invitations')
+        .insert({
+          space_id: coupleSpace.id,
+          invitation_code: code,
+          created_by: user.id,
+          expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .select('invitation_code')
+        .single()
+
+      if (error) {
+        console.error('Error generating invite:', error)
+        return null
+      }
+
+      return data.invitation_code
+    } catch (err) {
+      console.error('Error fetching invitation:', err)
       return null
     }
-
-    return data.invitation_code
   }
 
   return (

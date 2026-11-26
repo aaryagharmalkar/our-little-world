@@ -105,7 +105,11 @@ async function loadPhoto(photoUrl) {
 
   try {
     const req = new Request(photoUrl);
-    req.timeoutInterval = 10;
+    req.headers = {
+      "apikey": CONFIG.supabaseAnonKey,
+      "Authorization": \`Bearer \${CONFIG.supabaseAnonKey}\`,
+    };
+    req.timeoutInterval = 12;
     const img = await req.loadImage();
     if (img) {
       fm.writeImage(PHOTO_CACHE_PATH, img);
@@ -480,7 +484,10 @@ async function createLargeWidget(data, photoImg) {
 
 async function run() {
   const data = await fetchWidgetSnapshot();
-  const photoUrl = data.photo?.signed_url || data.photo?.public_url;
+  let photoUrl = data.photo?.signed_url || data.photo?.public_url;
+  if (!photoUrl && data.photo?.storage_path) {
+    photoUrl = \`\${CONFIG.supabaseUrl}/storage/v1/object/authenticated/photos/\${data.photo.storage_path}\`;
+  }
   const photoImg = await loadPhoto(photoUrl);
 
   let widget;
